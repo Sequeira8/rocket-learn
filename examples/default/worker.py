@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     # LINK TO THE REDIS SERVER YOU SHOULD HAVE RUNNING (USE THE SAME PASSWORD YOU SET IN THE REDIS
     # CONFIG)
-    r = Redis(host="127.0.0.1", password="you_better_use_a_password")
+    r = Redis(host="127.0.0.1", port=6379, username="sequeira", password="25$piia^TYu*jecxR&%z9")
 
 
     # LAUNCH ROCKET LEAGUE AND BEGIN TRAINING

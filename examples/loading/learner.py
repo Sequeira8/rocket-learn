@@ -79,4 +79,4 @@ if __name__ == "__main__":
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
     # -save_dir SPECIFIES WHERE
     # -clear DELETE REDIS ENTRIES WHEN STARTING UP (SET TO FALSE TO CONTINUE WITH OLD AGENTS)
-    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory", clear=False)
+    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory")

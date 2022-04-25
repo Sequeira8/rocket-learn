@@ -37,13 +37,13 @@ if __name__ == "__main__":
 
     # ROCKET-LEARN USES WANDB WHICH REQUIRES A LOGIN TO USE. YOU CAN SET AN ENVIRONMENTAL VARIABLE
     # OR HARDCODE IT IF YOU ARE NOT SHARING YOUR SOURCE FILES
-    wandb.login(key=os.environ["WANDB_KEY"])
-    logger = wandb.init(project="demo", entity="wandb_username")
+    wandb.login(key=os.environ.get("WANDB_KEY"))
+    logger = wandb.init(project="demo", entity="sequeira")
     logger.name = "DEFAULT_LEARNER_EXAMPLE"
 
     # LINK TO THE REDIS SERVER YOU SHOULD HAVE RUNNING (USE THE SAME PASSWORD YOU SET IN THE REDIS
     # CONFIG)
-    redis = Redis(password="you_better_use_a_password")
+    redis = Redis(host="127.0.0.1", port=6379, username="sequeira", password="25$piia^TYu*jecxR&%z9")
 
     # ENSURE OBSERVATION, REWARD, AND ACTION CHOICES ARE THE SAME IN THE WORKER
     def obs():
@@ -100,7 +100,6 @@ if __name__ == "__main__":
     alg = PPO(
         rollout_gen,
         agent,
-        ent_coef=0.01,
         n_steps=1_000_000,
         batch_size=20_000,
         minibatch_size=10_000,
@@ -119,4 +118,4 @@ if __name__ == "__main__":
     # -iterations_per_save SPECIFIES HOW OFTEN CHECKPOINTS ARE SAVED
     # -save_dir SPECIFIES WHERE
     # -clear DELETE REDIS ENTRIES WHEN STARTING UP
-    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory", clear=True)
+    alg.run(iterations_per_save=100, save_dir="checkpoint_save_directory")
