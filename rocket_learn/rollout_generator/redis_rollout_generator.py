@@ -192,7 +192,8 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             logger=None,
             clear=True,
             mmr_min_episode_length=150,
-            max_age=0
+            max_age=0,
+            min_sigma=0
     ):
         self.tot_bytes = 0
         self.redis = redis
@@ -215,6 +216,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
         self.mmr_min_episode_length = mmr_min_episode_length
         self.pretrained_agents = {}
         self.max_age = max_age
+        self.min_sigma = min_sigma
 
     @staticmethod
     def _process_rollout(rollout_bytes, latest_version, obs_build_func, rew_build_func, act_build_func, max_age):
@@ -259,8 +261,10 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
                 ratings_versions.setdefault(version, []).append(rating)
 
             for version, ratings in ratings_versions.items():
-                avg_rating = Rating((sum(r.mu for r in ratings) / len(ratings)),
-                                    (sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings)))  # Average vars
+                # In case of duplicates, average ratings together (not strictly necessary with default setup)
+                # Also limit sigma to its lower bound
+                avg_rating = Rating(sum(r.mu for r in ratings) / len(ratings),
+                                    max(sum(r.sigma ** 2 for r in ratings) ** 0.5 / len(ratings), self.min_sigma))
                 self.redis.lset(QUALITIES, version, _serialize(tuple(avg_rating)))
 
         return relevant_buffers
@@ -277,7 +281,7 @@ class RedisRolloutGenerator(BaseRolloutGenerator):
             )
             if res is not None:
                 buffers, versions, uuid, name, result = res
-                versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
+                # versions = [version for version in versions if version != 'na']  # don't track humans or hardcoded
 
                 relevant_buffers = self._update_ratings(name, versions, buffers, latest_version, result)
                 yield from relevant_buffers
@@ -402,8 +406,9 @@ class RedisRolloutWorker:
 
     def __init__(self, redis: Redis, name: str, match: Match,
                  past_version_prob=.2, evaluation_prob=0.01, sigma_target=1,
-                 streamer_mode=False, send_gamestates=True, pretrained_agents=None, human_agent=None,
-                 deterministic_old_prob=0.5, force_paging=False):
+                 streamer_mode=False, deterministic_streamer=False, send_gamestates=True, pretrained_agents=None,
+                 human_agent=None,
+                 deterministic_old_prob=0.5, force_paging=False, deterministic_evaluation=False):
         # TODO model or config+params so workers can recreate just from redis connection?
         self.redis = redis
         self.name = name
@@ -421,13 +426,17 @@ class RedisRolloutWorker:
             print("**           Pretrained Agents will be ignored.                **")
 
         self.streamer_mode = streamer_mode
+        self.deterministic_streamer = deterministic_streamer
 
         self.current_agent = _unserialize_model(self.redis.get(MODEL_LATEST))
+        if self.streamer_mode and self.deterministic_streamer:
+            self.current_agent.deterministic = True
         self.past_version_prob = past_version_prob
         self.evaluation_prob = evaluation_prob
         self.sigma_target = sigma_target
         self.send_gamestates = send_gamestates
         self.deterministic_old_prob = deterministic_old_prob
+        self.deterministic_evaluation = deterministic_evaluation
 
         # **DEFAULT NEEDS TO INCORPORATE BASIC SECURITY, THIS IS NOT SUFFICIENT**
         self.uuid = str(uuid4())
@@ -455,10 +464,10 @@ class RedisRolloutWorker:
             sigmas = np.array([r.sigma for r in ratings])
             probs = np.clip(sigmas - self.sigma_target, a_min=0, a_max=None)
             s = probs.sum()
-            if s == 0:
-                n_new = np.random.randint(1, n_old)
-                return self._get_opponent_indices(n_new, n_old - n_new, pretrained_choice)
-            probs /= s
+            if s == 0 or np.random.normal(0, 1) > self.sigma_target:
+                probs = np.ones_like(probs) / len(probs)
+            else:
+                probs /= s
             versions = [np.random.choice(len(ratings), p=probs)]
             target_rating = ratings[versions[0]]
             n_old -= 1
@@ -531,6 +540,8 @@ class RedisRolloutWorker:
                 latest_version = available_version
                 updated_agent = _unserialize_model(model_bytes)
                 self.current_agent = updated_agent
+                if self.streamer_mode and self.deterministic_streamer:
+                    self.current_agent.deterministic = True
 
             n += 1
             pretrained_choice = None
@@ -575,7 +586,8 @@ class RedisRolloutWorker:
                         agents.append(pretrained_choice)
                     else:
                         selected_agent = self._get_past_model(version)
-                        if np.random.random() < self.deterministic_old_prob:
+                        if np.random.random() < self.deterministic_old_prob \
+                                or n_new == 0 and self.deterministic_evaluation:
                             selected_agent.deterministic = True
                         agents.append(selected_agent)
                 versions = [v if v != -1 else latest_version for v in versions]
